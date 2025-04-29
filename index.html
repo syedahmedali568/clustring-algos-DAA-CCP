@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clustering Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .file-upload {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+            border: 2px dashed #9CA3AF;
+            border-radius: 0.5rem;
+            transition: all 0.3s ease;
+        }
+        
+        .file-upload:hover {
+            border-color: #3B82F6;
+            background-color: #F8FAFC;
+        }
+        
+        .file-upload.active {
+            border-color: #10B981;
+            background-color: #ECFDF5;
+        }
+        
+        .loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .tooltip {
+            position: relative;
+        }
+        
+        .tooltip-text {
+            visibility: hidden;
+            width: 200px;
+            background-color: #1F2937;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background-color: #E5E7EB;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #3B82F6;
+            transition: width 0.3s ease;
+        }
+        
+        .visualization-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .centroids-table {
+            width: 100%;
+            overflow-x: auto;
+            display: block;
+        }
+
+        .algorithm-params {
+            transition: all 0.3s ease;
+            max-height: 0;
+            overflow: hidden;
+        }
+
+        .algorithm-params.active {
+            max-height: 200px;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Clustering Visualizer</h1>
+            <p class="text-gray-600">Upload your dataset and visualize clustering results using different algorithms</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Left Panel - Controls -->
+            <div class="bg-white rounded-lg shadow-md p-6 lg:col-span-1">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">Controls</h2>
+                
+                <!-- Data Type Selection -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Data Type</label>
+                    <select id="dataType" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="csv">CSV File</option>
+                        <option value="demo" selected>Demo Data</option>
+                    </select>
+                </div>
+                
+                <!-- File Upload -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Upload Dataset</label>
+                    <div id="fileUpload" class="file-upload">
+                        <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
+                        <p class="text-gray-500 mb-1">Drag & drop your file here</p>
+                        <p class="text-gray-400 text-sm mb-3">or</p>
+                        <input id="fileInput" type="file" class="hidden" onchange="handleFileUpload()">
+                        <label for="fileInput" class="px-4 py-2 bg-indigo-600 text-white rounded-md cursor-pointer hover:bg-indigo-700 transition">
+                            <i class="fas fa-folder-open mr-2"></i>Browse Files
+                        </label>
+                        <p id="fileName" class="text-sm text-gray-500 mt-2"></p>
+                        <div id="fileProgress" class="progress-bar hidden">
+                            <div id="fileProgressFill" class="progress-bar-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Algorithm Selection -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Clustering Algorithm</label>
+                    <select id="algorithm" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="kmeans">K-Means</option>
+                        <option value="dbscan">DBSCAN</option>
+                    </select>
+                </div>
+                
+                <!-- K-Means Parameters -->
+                <div id="kmeansParams" class="algorithm-params active">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Number of Clusters (k)</label>
+                        <div class="flex items-center">
+                            <input id="clusterCount" type="range" min="2" max="10" value="3" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            <span id="clusterValue" class="ml-4 w-8 text-center font-medium text-gray-700">3</span>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Distance Metric</label>
+                        <select id="distanceMetric" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="euclidean">Euclidean</option>
+                            <option value="manhattan">Manhattan</option>
+                            <option value="cosine">Cosine</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- DBSCAN Parameters -->
+                <div id="dbscanParams" class="algorithm-params">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Epsilon (ε)</label>
+                        <div class="flex items-center">
+                            <input id="epsilon" type="range" min="0.1" max="5" step="0.1" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            <span id="epsilonValue" class="ml-4 w-12 text-center font-medium text-gray-700">0.5</span>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Minimum Points (minPts)</label>
+                        <div class="flex items-center">
+                            <input id="minPts" type="range" min="1" max="20" value="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            <span id="minPtsValue" class="ml-4 w-8 text-center font-medium text-gray-700">5</span>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Distance Metric</label>
+                        <select id="dbscanDistanceMetric" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            <option value="euclidean">Euclidean</option>
+                            <option value="manhattan">Manhattan</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div class="space-y-3">
+                    <button id="summaryBtn" class="w-full flex items-center justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition tooltip">
+                        <i class="fas fa-info-circle mr-2"></i>Data Summary
+                        <span class="tooltip-text">View basic statistics and information about your dataset</span>
+                    </button>
+                    <button id="clusterBtn" class="w-full flex items-center justify-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition tooltip">
+                        <i class="fas fa-project-diagram mr-2"></i>Run Clustering
+                        <span class="tooltip-text">Perform clustering on your dataset</span>
+                    </button>
+                    <button id="visualizeBtn" class="w-full flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition tooltip">
+                        <i class="fas fa-chart-bar mr-2"></i>Visualize Results
+                        <span class="tooltip-text">Generate visualizations of your clustering results</span>
+                    </button>
+                    <button id="resetBtn" class="w-full flex items-center justify-center px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition tooltip">
+                        <i class="fas fa-redo mr-2"></i>Reset
+                        <span class="tooltip-text">Clear all inputs and results</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Right Panel - Results -->
+            <div class="bg-white rounded-lg shadow-md p-6 lg:col-span-2">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">Results</h2>
+                </div>
+                
+                <!-- Tab Navigation -->
+                <div class="border-b border-gray-200 mb-4">
+                    <nav class="-mb-px flex space-x-8 overflow-x-auto">
+                        <button id="summaryTab" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-600">Summary</button>
+                        <button id="clustersTab" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Clusters</button>
+                        <button id="visualizationTab" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Visualization</button>
+                    </nav>
+                </div>
+                
+                <!-- Tab Content -->
+                <div id="tabContent">
+                    <!-- Summary Tab -->
+                    <div id="summaryContent" class="space-y-4">
+                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-info-circle text-blue-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm text-blue-700">
+                                        Upload a dataset to view its summary statistics and information.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-gray-50 p-4 rounded-lg">
+                                <h3 class="font-medium text-gray-700 mb-2">Dataset Info</h3>
+                                <div class="space-y-2">
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-500">Rows:</span>
+                                        <span id="rowCount" class="font-medium">-</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-500">Columns:</span>
+                                        <span id="colCount" class="font-medium">-</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-500">Type:</span>
+                                        <span id="dataTypeDisplay" class="font-medium">-</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-500">Size:</span>
+                                        <span id="fileSize" class="font-medium">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-gray-50 p-4 rounded-lg">
+                                <h3 class="font-medium text-gray-700 mb-2">Numeric Columns</h3>
+                                <div id="numericColumns" class="text-gray-500">
+                                    No numeric columns detected
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="font-medium text-gray-700 mb-2">Five Number Summary</h3>
+                            <div id="statsTable" class="overflow-x-auto">
+                                <p class="text-gray-500">No statistics available. Upload a dataset with numeric columns to view statistics.</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Clusters Tab -->
+                    <div id="clustersContent" class="hidden space-y-4">
+                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-info-circle text-blue-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm text-blue-700">
+                                        Run clustering to view cluster assignments and results.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="font-medium text-gray-700 mb-2">Cluster Assignments</h3>
+                            <div id="clusterAssignments" class="text-gray-500">
+                                No clustering results available. Run clustering first.
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="font-medium text-gray-700 mb-2">Algorithm Results</h3>
+                            <div class="centroids-table">
+                                <div id="algorithmResults" class="text-gray-500">
+                                    No results available. Run clustering first.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Visualization Tab -->
+                    <div id="visualizationContent" class="hidden">
+                        <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-info-circle text-blue-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm text-blue-700">
+                                        Visualize your clustering results after running the algorithm.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <h3 class="font-medium text-gray-700">Visualization Type</h3>
+                                <select id="vizType" class="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="scatter">Scatter Plot</option>
+                                    <option value="histogram">Cluster Distribution</option>
+                                </select>
+                            </div>
+                            
+                            <div class="visualization-container">
+                                <div class="chart-container">
+                                    <canvas id="clusterChart"></canvas>
+                                </div>
+                            </div>
+                            
+                            <div id="chartDescription" class="mt-2 text-sm text-gray-500">
+                                Select a visualization type to display the clustering results.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Application State
+        const AppState = {
+            uploadedFile: null,
+            dataset: null,
+            clusteringResults: null,
+            chart: null
+        };
+
+        // DOM Elements
+        const DOM = {
+            fileUpload: document.getElementById('fileUpload'),
+            fileInput: document.getElementById('fileInput'),
+            fileName: document.getElementById('fileName'),
+            fileProgress: document.getElementById('fileProgress'),
+            fileProgressFill: document.getElementById('fileProgressFill'),
+            dataTypeSelect: document.getElementById('dataType'),
+            algorithmSelect: document.getElementById('algorithm'),
+            kmeansParams: document.getElementById('kmeansParams'),
+            dbscanParams: document.getElementById('dbscanParams'),
+            clusterCount: document.getElementById('clusterCount'),
+            clusterValue: document.getElementById('clusterValue'),
+            distanceMetric: document.getElementById('distanceMetric'),
+            epsilon: document.getElementById('epsilon'),
+            epsilonValue: document.getElementById('epsilonValue'),
+            minPts: document.getElementById('minPts'),
+            minPtsValue: document.getElementById('minPtsValue'),
+            dbscanDistanceMetric: document.getElementById('dbscanDistanceMetric'),
+            summaryBtn: document.getElementById('summaryBtn'),
+            clusterBtn: document.getElementById('clusterBtn'),
+            visualizeBtn: document.getElementById('visualizeBtn'),
+            resetBtn: document.getElementById('resetBtn'),
+            summaryTab: document.getElementById('summaryTab'),
+            clustersTab: document.getElementById('clustersTab'),
+            visualizationTab: document.getElementById('visualizationTab'),
+            summaryContent: document.getElementById('summaryContent'),
+            clustersContent: document.getElementById('clustersContent'),
+            visualizationContent: document.getElementById('visualizationContent'),
+            rowCount: document.getElementById('rowCount'),
+            colCount: document.getElementById('colCount'),
+            dataTypeDisplay: document.getElementById('dataTypeDisplay'),
+            fileSize: document.getElementById('fileSize'),
+            numericColumns: document.getElementById('numericColumns'),
+            statsTable: document.getElementById('statsTable'),
+            clusterAssignments: document.getElementById('clusterAssignments'),
+            algorithmResults: document.getElementById('algorithmResults'),
+            chartDescription: document.getElementById('chartDescription'),
+            vizType: document.getElementById('vizType'),
+            clusterChart: document.getElementById('clusterChart')
+        };
+
+        // Initialize the application
+        function init() {
+            updateFileAccept();
+            setupEventListeners();
+            generateDemoData(); // Generate demo data by default
+            showDataSummary();
+        }
+
+        // Update file input accept attribute based on selected data type
+        function updateFileAccept() {
+            const type = DOM.dataTypeSelect.value;
+            if (type === 'csv') {
+                DOM.fileInput.accept = '.csv';
+            } else if (type === 'demo') {
+                DOM.fileInput.accept = '';
+            }
+        }
+
+        // Setup all event listeners
+        function setupEventListeners() {
+            // File upload related
+            DOM.fileUpload.addEventListener('dragover', handleDragOver);
+            DOM.fileUpload.addEventListener('dragleave', handleDragLeave);
+            DOM.fileUpload.addEventListener('drop', handleDrop);
+            
+            DOM.dataTypeSelect.addEventListener('change', updateFileAccept);
+            
+            // Algorithm selection
+            DOM.algorithmSelect.addEventListener('change', toggleAlgorithmParams);
+            
+            // K-Means parameters
+            DOM.clusterCount.addEventListener('input', () => {
+                DOM.clusterValue.textContent = DOM.clusterCount.value;
+            });
+            
+            // DBSCAN parameters
+            DOM.epsilon.addEventListener('input', () => {
+                DOM.epsilonValue.textContent = DOM.epsilon.value;
+            });
+            
+            DOM.minPts.addEventListener('input', () => {
+                DOM.minPtsValue.textContent = DOM.minPts.value;
+            });
+            
+            // Button click handlers
+            DOM.summaryBtn.addEventListener('click', showDataSummary);
+            DOM.clusterBtn.addEventListener('click', runClustering);
+            DOM.visualizeBtn.addEventListener('click', visualizeResults);
+            DOM.resetBtn.addEventListener('click', resetApplication);
+            
+            // Tab click handlers
+            DOM.summaryTab.addEventListener('click', () => showTab('summary'));
+            DOM.clustersTab.addEventListener('click', () => showTab('clusters'));
+            DOM.visualizationTab.addEventListener('click', () => showTab('visualization'));
+            
+            // Viz type change handler
+            DOM.vizType.addEventListener('change', () => {
+                if (AppState.clusteringResults) {
+                    visualizeResults();
+                }
+            });
+        }
+
+        // Toggle between algorithm parameters
+        function toggleAlgorithmParams() {
+            const algorithm = DOM.algorithmSelect.value;
+            
+            if (algorithm === 'kmeans') {
+                DOM.kmeansParams.classList.add('active');
+                DOM.dbscanParams.classList.remove('active');
+            } else if (algorithm === 'dbscan') {
+                DOM.kmeansParams.classList.remove('active');
+                DOM.dbscanParams.classList.add('active');
+            }
+        }
+
+        // Drag and drop handlers
+        function handleDragOver(e) {
+            e.preventDefault();
+            DOM.fileUpload.classList.add('active');
+        }
+
+        function handleDragLeave() {
+            DOM.fileUpload.classList.remove('active');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            DOM.fileUpload.classList.remove('active');
+            if (e.dataTransfer.files.length) {
+                DOM.fileInput.files = e.dataTransfer.files;
+                handleFileUpload();
+            }
+        }
+
+        // Handle file upload
+        function handleFileUpload() {
+            const file = DOM.fileInput.files[0];
+            if (file) {
+                AppState.uploadedFile = file;
+                DOM.fileName.textContent = file.name;
+                DOM.fileUpload.classList.add('active');
+                DOM.fileProgress.classList.remove('hidden');
+                
+                // Show loading state
+                DOM.fileName.innerHTML = `<span class="text-blue-500">Processing ${file.name}...</span>`;
+                
+                // Process the file immediately
+                processUploadedFile();
+                
+                // Simulate progress
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += 5;
+                    DOM.fileProgressFill.style.width = `${progress}%`;
+                    
+                    if (progress >= 100) {
+                        clearInterval(progressInterval);
+                        DOM.fileName.innerHTML = `<span class="text-green-500">${file.name}</span>`;
+                        DOM.fileProgress.classList.add('hidden');
+                    }
+                }, 50);
+            }
+        }
+
+        // Process the uploaded file based on its type
+        function processUploadedFile() {
+            const type = DOM.dataTypeSelect.value;
+            
+            if (type === 'demo') {
+                generateDemoData();
+                showDataSummary();
+                DOM.fileName.innerHTML = `<span class="text-green-500">Demo data loaded successfully</span>`;
+                DOM.fileProgress.classList.add('hidden');
+                return;
+            }
+            
+            if (type === 'csv') {
+                processCSVFile();
+            }
+        }
+
+        // Process CSV file using PapaParse
+        function processCSVFile() {
+            Papa.parse(AppState.uploadedFile, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.errors.length > 0) {
+                        DOM.fileName.innerHTML = `<span class="text-red-500">Error processing CSV file</span>`;
+                        console.error('CSV parsing errors:', results.errors);
+                        return;
+                    }
+                    
+                    processParsedData(results.data, results.meta.fields);
+                    DOM.fileProgress.classList.add('hidden');
+                },
+                error: function(error) {
+                    DOM.fileName.innerHTML = `<span class="text-red-500">Error loading CSV file</span>`;
+                    console.error('CSV parsing error:', error);
+                    DOM.fileProgress.classList.add('hidden');
+                }
+            });
+        }
+
+        // Process parsed data into our dataset structure
+        function processParsedData(data, columns) {
+            if (!data || data.length === 0) {
+                DOM.fileName.innerHTML = `<span class="text-red-500">No data found in file</span>`;
+                return;
+            }
+            
+            // Determine column types
+            const columnTypes = [];
+            const sampleRow = data[0];
+            
+            for (const key in sampleRow) {
+                if (typeof sampleRow[key] === 'number') {
+                    columnTypes.push('numeric');
+                } else {
+                    columnTypes.push('categorical');
+                }
+            }
+            
+            // Create dataset object
+            AppState.dataset = {
+                type: DOM.dataTypeSelect.value,
+                rows: data.length,
+                cols: columns.length,
+                columns: columns.map((col, idx) => ({
+                    name: col,
+                    type: columnTypes[idx]
+                })),
+                data: data.map(row => {
+                    const rowData = [];
+                    for (const col of columns) {
+                        rowData.push(row[col]);
+                    }
+                    return rowData;
+                })
+            };
+            
+            // Update file size display
+            DOM.fileSize.textContent = formatFileSize(AppState.uploadedFile.size);
+            DOM.dataTypeDisplay.textContent = AppState.dataset.type === 'csv' ? 'CSV' : 'Demo';
+            
+            // Enable cluster button
+            DOM.clusterBtn.disabled = false;
+            
+            // Show success message
+            DOM.fileName.innerHTML = `<span class="text-green-500">${AppState.uploadedFile.name} loaded successfully</span>`;
+            
+            // Show data summary
+            showDataSummary();
+        }
+
+        // Format file size for display
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Generate demo data (Iris dataset inspired)
+        function generateDemoData() {
+            const type = 'demo';
+            const numRows = 150;
+            const numCols = 4;
+            
+            AppState.dataset = {
+                type: type,
+                rows: numRows,
+                cols: numCols,
+                columns: [
+                    { name: 'Sepal Length', type: 'numeric' },
+                    { name: 'Sepal Width', type: 'numeric' },
+                    { name: 'Petal Length', type: 'numeric' },
+                    { name: 'Petal Width', type: 'numeric' }
+                ],
+                data: []
+            };
+            
+            // Generate random data points with clear cluster structure
+            for (let i = 0; i < numRows; i++) {
+                // Create clear cluster structure
+                const clusterCenter = Math.floor(i / 50); // 3 clusters of 50 points each
+                
+                const point = [
+                    clusterCenter * 1.5 + 4 + (Math.random() * 0.8 - 0.4), // Sepal Length
+                    clusterCenter * 0.5 + 3 + (Math.random() * 0.5 - 0.25), // Sepal Width
+                    clusterCenter * 1.2 + 1 + (Math.random() * 0.6 - 0.3),  // Petal Length
+                    clusterCenter * 0.8 + 0.5 + (Math.random() * 0.4 - 0.2) // Petal Width
+                ];
+                
+                AppState.dataset.data.push(point.map(val => typeof val === 'number' ? +(val.toFixed(2)) : val));
+            }
+            
+            // Update file size display
+            DOM.fileSize.textContent = 'Demo Data';
+            DOM.dataTypeDisplay.textContent = 'Demo';
+            
+            // Enable cluster button
+            DOM.clusterBtn.disabled = false;
+        }
+
+        // Show data summary in the UI
+        function showDataSummary() {
+            if (!AppState.dataset) return;
+            
+            DOM.rowCount.textContent = AppState.dataset.rows;
+            DOM.colCount.textContent = AppState.dataset.cols;
+            
+            // Show numeric columns
+            const numericCols = AppState.dataset.columns.filter(col => col.type === 'numeric');
+            if (numericCols.length) {
+                DOM.numericColumns.innerHTML = numericCols.map(col => 
+                    `<span class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2">${col.name}</span>`
+                ).join('');
+            } else {
+                DOM.numericColumns.textContent = 'No numeric columns detected';
+            }
+            
+            // Show five number summary for numeric columns
+            if (numericCols.length) {
+                let statsHTML = `
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Column</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Q1</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Median</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Q3</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">`;
+                
+                numericCols.forEach(col => {
+                    const colIndex = AppState.dataset.columns.findIndex(c => c.name === col.name);
+                    const values = AppState.dataset.data.map(row => row[colIndex]).filter(val => typeof val === 'number');
+                    values.sort((a, b) => a - b);
+                    
+                    const min = values[0];
+                    const max = values[values.length - 1];
+                    const median = calculatePercentile(values, 0.5);
+                    const q1 = calculatePercentile(values, 0.25);
+                    const q3 = calculatePercentile(values, 0.75);
+                    
+                    statsHTML += `
+                        <tr>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">${col.name}</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${min.toFixed(2)}</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${q1.toFixed(2)}</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${median.toFixed(2)}</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${q3.toFixed(2)}</td>
+                            <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${max.toFixed(2)}</td>
+                        </tr>`;
+                });
+                
+                statsHTML += `</tbody></table>`;
+                DOM.statsTable.innerHTML = statsHTML;
+            } else {
+                DOM.statsTable.innerHTML = '<p class="text-gray-500">No statistics available. Upload a dataset with numeric columns to view statistics.</p>';
+            }
+            
+            // Show summary tab by default
+            showTab('summary');
+        }
+
+        // Calculate percentile for five number summary
+        function calculatePercentile(values, percentile) {
+            if (values.length === 0) return 0;
+            
+            const index = (values.length - 1) * percentile;
+            const lower = Math.floor(index);
+            const upper = Math.ceil(index);
+            
+            if (lower === upper) {
+                return values[lower];
+            }
+            
+            return values[lower] + (values[upper] - values[lower]) * (index - lower);
+        }
+
+        // Run clustering algorithm based on selection
+        function runClustering() {
+            if (!AppState.dataset) return;
+            
+            // Get numeric columns
+            const numericCols = AppState.dataset.columns
+                .map((col, idx) => col.type === 'numeric' ? idx : -1)
+                .filter(idx => idx !== -1);
+            
+            if (numericCols.length < 2) {
+                alert('You need at least 2 numeric columns to perform clustering');
+                return;
+            }
+            
+            // Extract numeric data
+            const numericData = AppState.dataset.data.map(row => 
+                numericCols.map(colIdx => row[colIdx])
+            );
+            
+            // Show loading state
+            DOM.clusterBtn.innerHTML = `<div class="loading-spinner"></div> Processing...`;
+            DOM.clusterBtn.disabled = true;
+            
+            // Get selected algorithm
+            const algorithm = DOM.algorithmSelect.value;
+            
+            // Simulate clustering (in a real app, you would use a proper clustering library)
+            setTimeout(() => {
+                if (algorithm === 'kmeans') {
+                    // Get K-Means parameters
+                    const k = parseInt(DOM.clusterCount.value);
+                    const metric = DOM.distanceMetric.value;
+                    
+                    AppState.clusteringResults = {
+                        algorithm: 'kmeans',
+                        results: performKMeans(numericData, k, metric)
+                    };
+                } else if (algorithm === 'dbscan') {
+                    // Get DBSCAN parameters
+                    const epsilon = parseFloat(DOM.epsilon.value);
+                    const minPts = parseInt(DOM.minPts.value);
+                    const metric = DOM.dbscanDistanceMetric.value;
+                    
+                    AppState.clusteringResults = {
+                        algorithm: 'dbscan',
+                        results: performDBSCAN(numericData, epsilon, minPts, metric)
+                    };
+                }
+                
+                // Update UI
+                DOM.clusterBtn.innerHTML = `<i class="fas fa-project-diagram mr-2"></i>Run Clustering`;
+                DOM.clusterBtn.disabled = false;
+                DOM.visualizeBtn.disabled = false;
+                
+                // Show cluster results
+                showClusterResults();
+                
+                // Show clusters tab
+                showTab('clusters');
+            }, 1000);
+        }
+
+        // KMeans algorithm implementation
+        function performKMeans(data, k, metric) {
+            // Initialize centroids using k-means++ algorithm for better starting points
+            const centroids = [data[Math.floor(Math.random() * data.length)]];
+            
+            for (let i = 1; i < k; i++) {
+                // Calculate distances to nearest centroid for each point
+                const distances = data.map(point => {
+                    const minDist = centroids.reduce((min, centroid) => {
+                        const dist = calculateDistance(point, centroid, metric);
+                        return Math.min(min, dist);
+                    }, Infinity);
+                    return minDist;
+                });
+                
+                // Calculate probabilities
+                const sum = distances.reduce((a, b) => a + b, 0);
+                const probabilities = distances.map(d => d / sum);
+                
+                // Select next centroid based on probabilities
+                let r = Math.random();
+                let index = 0;
+                while (r > 0 && index < data.length) {
+                    r -= probabilities[index];
+                    index++;
+                }
+                centroids.push([...data[index - 1]]);
+            }
+            
+            let assignments = new Array(data.length).fill(-1);
+            let changed = true;
+            let iterations = 0;
+            const maxIterations = 100;
+            
+            while (changed && iterations < maxIterations) {
+                changed = false;
+                iterations++;
+                
+                // Assign points to nearest centroid
+                for (let i = 0; i < data.length; i++) {
+                    let minDist = Infinity;
+                    let bestCluster = -1;
+                    
+                    for (let j = 0; j < centroids.length; j++) {
+                        const dist = calculateDistance(data[i], centroids[j], metric);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            bestCluster = j;
+                        }
+                    }
+                    
+                    if (assignments[i] !== bestCluster) {
+                        changed = true;
+                        assignments[i] = bestCluster;
+                    }
+                }
+                
+                // Update centroids
+                const clusterSums = new Array(k).fill().map(() => new Array(data[0].length).fill(0));
+                const clusterCounts = new Array(k).fill(0);
+                
+                for (let i = 0; i < data.length; i++) {
+                    const cluster = assignments[i];
+                    for (let j = 0; j < data[i].length; j++) {
+                        clusterSums[cluster][j] += data[i][j];
+                    }
+                    clusterCounts[cluster]++;
+                }
+                
+                for (let i = 0; i < k; i++) {
+                    if (clusterCounts[i] > 0) {
+                        for (let j = 0; j < centroids[i].length; j++) {
+                            centroids[i][j] = clusterSums[i][j] / clusterCounts[i];
+                        }
+                    }
+                }
+            }
+            
+            return {
+                assignments: assignments,
+                centroids: centroids,
+                iterations: iterations
+            };
+        }
+
+        // DBSCAN algorithm implementation
+        function performDBSCAN(data, epsilon, minPts, metric) {
+            const n = data.length;
+            const assignments = new Array(n).fill(-1); // -1 means noise
+            let clusterId = 0;
+            
+            for (let i = 0; i < n; i++) {
+                if (assignments[i] !== -1) continue; // Already assigned to a cluster
+                
+                // Find all neighbors within epsilon distance
+                const neighbors = findNeighbors(data, i, epsilon, metric);
+                
+                if (neighbors.length < minPts) {
+                    // Mark as noise
+                    assignments[i] = -1;
+                    continue;
+                }
+                
+                // Start a new cluster
+                clusterId++;
+                assignments[i] = clusterId;
+                
+                // Process all neighbors
+                const seedSet = [...neighbors];
+                while (seedSet.length > 0) {
+                    const j = seedSet.shift();
+                    
+                    if (assignments[j] === -1) {
+                        // Change noise to border point
+                        assignments[j] = clusterId;
+                    }
+                    
+                    if (assignments[j] !== -1) continue; // Already assigned to a cluster
+                    
+                    assignments[j] = clusterId;
+                    
+                    // Find neighbors of this point
+                    const newNeighbors = findNeighbors(data, j, epsilon, metric);
+                    
+                    if (newNeighbors.length >= minPts) {
+                        // Add new neighbors to seed set
+                        seedSet.push(...newNeighbors.filter(idx => !seedSet.includes(idx)));
+                    }
+                }
+            }
+            
+            return {
+                assignments: assignments,
+                clustersFound: clusterId,
+                noisePoints: assignments.filter(a => a === -1).length
+            };
+        }
+
+        // Find neighbors for DBSCAN
+        function findNeighbors(data, pointIndex, epsilon, metric) {
+            const neighbors = [];
+            const point = data[pointIndex];
+            
+            for (let i = 0; i < data.length; i++) {
+                if (i === pointIndex) continue;
+                
+                const distance = calculateDistance(point, data[i], metric);
+                if (distance <= epsilon) {
+                    neighbors.push(i);
+                }
+            }
+            
+            return neighbors;
+        }
+
+        // Calculate distance between two points based on selected metric
+        function calculateDistance(a, b, metric) {
+            if (metric === 'euclidean') {
+                let sum = 0;
+                for (let i = 0; i < a.length; i++) {
+                    sum += Math.pow(a[i] - b[i], 2);
+                }
+                return Math.sqrt(sum);
+            } else if (metric === 'manhattan') {
+                let sum = 0;
+                for (let i = 0; i < a.length; i++) {
+                    sum += Math.abs(a[i] - b[i]);
+                }
+                return sum;
+            } else if (metric === 'cosine') {
+                let dotProduct = 0;
+                let aMagnitude = 0;
+                let bMagnitude = 0;
+                
+                for (let i = 0; i < a.length; i++) {
+                    dotProduct += a[i] * b[i];
+                    aMagnitude += a[i] * a[i];
+                    bMagnitude += b[i] * b[i];
+                }
+                
+                aMagnitude = Math.sqrt(aMagnitude);
+                bMagnitude = Math.sqrt(bMagnitude);
+                
+                if (aMagnitude === 0 || bMagnitude === 0) return 0;
+                return 1 - (dotProduct / (aMagnitude * bMagnitude));
+            }
+            
+            return 0;
+        }
+
+        // Show clustering results in the UI
+        function showClusterResults() {
+            if (!AppState.clusteringResults) return;
+            
+            const algorithm = AppState.clusteringResults.algorithm;
+            const results = AppState.clusteringResults.results;
+            
+            // Show cluster assignments
+            const assignments = results.assignments;
+            const uniqueClusters = [...new Set(assignments)].sort((a, b) => a - b);
+            
+            let assignmentsHTML = `
+                <div class="mb-4">
+                    <p class="text-sm text-gray-500 mb-2">Total points: ${assignments.length}</p>
+                    <p class="text-sm text-gray-500">Number of clusters: ${uniqueClusters.filter(c => c !== -1).length}</p>`;
+            
+            if (algorithm === 'dbscan') {
+                assignmentsHTML += `<p class="text-sm text-gray-500">Noise points: ${results.noisePoints}</p>`;
+            }
+            
+            assignmentsHTML += `</div><div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+            
+            uniqueClusters.forEach(cluster => {
+                if (cluster === -1) {
+                    // Noise points for DBSCAN
+                    if (algorithm === 'dbscan') {
+                        const count = assignments.filter(a => a === cluster).length;
+                        const percentage = (count / assignments.length * 100).toFixed(1);
+                        
+                        assignmentsHTML += `
+                            <div class="bg-white border border-gray-200 rounded-lg p-3">
+                                <div class="flex justify-between items-center mb-1">
+                                    <span class="font-medium">Noise Points</span>
+                                    <span class="text-sm text-gray-500">${percentage}%</span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                    <div class="bg-gray-600 h-2 rounded-full" style="width: ${percentage}%"></div>
+                                </div>
+                                <div class="text-right mt-1">
+                                    <span class="text-xs text-gray-500">${count} points</span>
+                                </div>
+                            </div>`;
+                    }
+                } else {
+                    const count = assignments.filter(a => a === cluster).length;
+                    const percentage = (count / assignments.length * 100).toFixed(1);
+                    
+                    assignmentsHTML += `
+                        <div class="bg-white border border-gray-200 rounded-lg p-3">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="font-medium">Cluster ${cluster}</span>
+                                <span class="text-sm text-gray-500">${percentage}%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2">
+                                <div class="bg-blue-600 h-2 rounded-full" style="width: ${percentage}%"></div>
+                            </div>
+                            <div class="text-right mt-1">
+                                <span class="text-xs text-gray-500">${count} points</span>
+                            </div>
+                        </div>`;
+                }
+            });
+            
+            assignmentsHTML += `</div>`;
+            DOM.clusterAssignments.innerHTML = assignmentsHTML;
+            
+            // Show algorithm-specific results
+            let resultsHTML = '';
+            
+            if (algorithm === 'kmeans') {
+                const centroids = results.centroids;
+                const numericCols = AppState.dataset.columns
+                    .map((col, idx) => col.type === 'numeric' ? idx : -1)
+                    .filter(idx => idx !== -1);
+                
+                resultsHTML = `
+                    <h4 class="font-medium text-gray-700 mb-2">K-Means Centroids</h4>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cluster</th>`;
+                
+                numericCols.forEach(colIdx => {
+                    resultsHTML += `<th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${AppState.dataset.columns[colIdx].name}</th>`;
+                });
+                
+                resultsHTML += `</tr></thead><tbody class="bg-white divide-y divide-gray-200">`;
+                
+                centroids.forEach((centroid, idx) => {
+                    resultsHTML += `<tr>`;
+                    resultsHTML += `<td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Cluster ${idx + 1}</td>`;
+                    
+                    centroid.forEach((val, i) => {
+                        resultsHTML += `<td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${val.toFixed(2)}</td>`;
+                    });
+                    
+                    resultsHTML += `</tr>`;
+                });
+                
+                resultsHTML += `</tbody></table>
+                    </div>
+                    <div class="mt-2 text-sm text-gray-500">
+                        <p>Iterations: ${results.iterations}</p>
+                    </div>`;
+            } else if (algorithm === 'dbscan') {
+                resultsHTML = `
+                    <h4 class="font-medium text-gray-700 mb-2">DBSCAN Results</h4>
+                    <div class="text-sm text-gray-500">
+                        <p>Clusters found: ${results.clustersFound}</p>
+                        <p>Noise points: ${results.noisePoints}</p>
+                        <p>Epsilon (ε): ${DOM.epsilon.value}</p>
+                        <p>Minimum points (minPts): ${DOM.minPts.value}</p>
+                    </div>`;
+            }
+            
+            DOM.algorithmResults.innerHTML = resultsHTML;
+        }
+
+        // Visualize the clustering results
+        function visualizeResults() {
+            if (!AppState.clusteringResults || !AppState.dataset) return;
+            
+            const vizTypeValue = DOM.vizType.value;
+            const algorithm = AppState.clusteringResults.algorithm;
+            
+            // Get numeric columns
+            const numericCols = AppState.dataset.columns
+                .map((col, idx) => col.type === 'numeric' ? idx : -1)
+                .filter(idx => idx !== -1);
+            
+            if (numericCols.length < 2) {
+                alert('You need at least 2 numeric columns to visualize');
+                return;
+            }
+            
+            // Show loading state
+            DOM.visualizeBtn.innerHTML = `<div class="loading-spinner"></div> Visualizing...`;
+            DOM.visualizeBtn.disabled = true;
+            
+            setTimeout(() => {
+                if (vizTypeValue === 'scatter') {
+                    createScatterPlot();
+                } else if (vizTypeValue === 'histogram') {
+                    createHistogram();
+                }
+                
+                // Restore button state
+                DOM.visualizeBtn.innerHTML = `<i class="fas fa-chart-bar mr-2"></i>Visualize Results`;
+                DOM.visualizeBtn.disabled = false;
+                
+                // Show visualization tab
+                showTab('visualization');
+            }, 500);
+        }
+
+        // Create scatter plot visualization
+        function createScatterPlot() {
+            // Get first two numeric columns for scatter plot
+            const numericCols = AppState.dataset.columns
+                .map((col, idx) => col.type === 'numeric' ? idx : -1)
+                .filter(idx => idx !== -1);
+            
+            const xCol = numericCols[0];
+            const yCol = numericCols[1];
+            const xLabel = AppState.dataset.columns[xCol].name;
+            const yLabel = AppState.dataset.columns[yCol].name;
+            
+            const algorithm = AppState.clusteringResults.algorithm;
+            const results = AppState.clusteringResults.results;
+            const assignments = results.assignments;
+            
+            // Prepare data for Chart.js
+            const uniqueClusters = [...new Set(assignments)].sort((a, b) => a - b);
+            const datasets = [];
+            
+            uniqueClusters.forEach(cluster => {
+                if (cluster === -1 && algorithm === 'dbscan') {
+                    // Noise points for DBSCAN
+                    const noiseData = AppState.dataset.data.filter((_, idx) => 
+                        assignments[idx] === cluster
+                    );
+                    
+                    datasets.push({
+                        label: 'Noise Points',
+                        data: noiseData.map(row => ({
+                            x: row[xCol],
+                            y: row[yCol]
+                        })),
+                        backgroundColor: '#9CA3AF',
+                        borderColor: '#6B7280',
+                        borderWidth: 1,
+                        pointRadius: 6,
+                        pointHoverRadius: 8
+                    });
+                } else if (cluster !== -1) {
+                    const clusterData = AppState.dataset.data.filter((_, idx) => 
+                        assignments[idx] === cluster
+                    );
+                    
+                    datasets.push({
+                        label: `Cluster ${cluster}`,
+                        data: clusterData.map(row => ({
+                            x: row[xCol],
+                            y: row[yCol]
+                        })),
+                        backgroundColor: getClusterColor(cluster),
+                        borderColor: getClusterColor(cluster, true),
+                        borderWidth: 1,
+                        pointRadius: 6,
+                        pointHoverRadius: 8
+                    });
+                }
+            });
+            
+            // Add centroids for K-Means
+            if (algorithm === 'kmeans') {
+                datasets.push({
+                    label: 'Centroids',
+                    data: results.centroids.map(centroid => ({
+                        x: centroid[0],
+                        y: centroid[1]
+                    })),
+                    backgroundColor: '#000000',
+                    borderColor: '#ffffff',
+                    borderWidth: 2,
+                    pointRadius: 10,
+                    pointHoverRadius: 12,
+                    pointStyle: 'rectRot'
+                });
+            }
+            
+            // Create or update chart
+            if (AppState.chart) {
+                AppState.chart.destroy();
+            }
+            
+            const ctx = DOM.clusterChart.getContext('2d');
+            AppState.chart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: xLabel,
+                                font: {
+                                    weight: 'bold'
+                                }
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: yLabel,
+                                font: {
+                                    weight: 'bold'
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label === 'Centroids') {
+                                        return label;
+                                    }
+                                    
+                                    const dataIndex = context.dataIndex;
+                                    const clusterIndex = context.datasetIndex;
+                                    const point = AppState.dataset.data.find((_, idx) => 
+                                        AppState.clusteringResults.results.assignments[idx] === clusterIndex && 
+                                        Math.abs(AppState.dataset.data[idx][xCol] - context.parsed.x) < 0.01 && 
+                                        Math.abs(AppState.dataset.data[idx][yCol] - context.parsed.y) < 0.01
+                                    );
+                                    
+                                    if (point) {
+                                        return `${label}: (${context.parsed.x.toFixed(2)}, ${context.parsed.y.toFixed(2)})`;
+                                    }
+                                    
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Update description
+            let description = '';
+            
+            if (algorithm === 'kmeans') {
+                description = `
+                    <p class="font-medium">K-Means Scatter Plot Interpretation:</p>
+                    <p>This visualization shows the relationship between <span class="font-semibold">${xLabel}</span> 
+                    and <span class="font-semibold">${yLabel}</span> with points colored by their cluster assignment.</p>
+                    <p>The square markers represent the cluster centroids (averages). Points closer to a centroid are more typical of that cluster.</p>
+                    <p>Well-separated clusters indicate distinct groups in your data, while overlapping clusters may suggest the need to adjust the number of clusters.</p>`;
+            } else if (algorithm === 'dbscan') {
+                description = `
+                    <p class="font-medium">DBSCAN Scatter Plot Interpretation:</p>
+                    <p>This visualization shows the relationship between <span class="font-semibold">${xLabel}</span> 
+                    and <span class="font-semibold">${yLabel}</span> with points colored by their cluster assignment.</p>
+                    <p>Gray points represent noise (points not assigned to any cluster).</p>
+                    <p>Dense regions form clusters, while sparse regions are marked as noise. Adjust epsilon (ε) and minPts to control the density threshold.</p>`;
+            }
+            
+            DOM.chartDescription.innerHTML = description;
+        }
+
+        // Create histogram visualization
+        function createHistogram() {
+            const algorithm = AppState.clusteringResults.algorithm;
+            const results = AppState.clusteringResults.results;
+            const assignments = results.assignments;
+            
+            // Count points in each cluster
+            const uniqueClusters = [...new Set(assignments)].sort((a, b) => a - b);
+            
+            const clusterCounts = uniqueClusters.map(cluster => 
+                assignments.filter(a => a === cluster).length
+            );
+            
+            const totalPoints = assignments.length;
+            const percentages = clusterCounts.map(count => 
+                (count / totalPoints * 100).toFixed(1)
+            );
+            
+            // Prepare labels and colors
+            const labels = uniqueClusters.map(c => c === -1 ? 'Noise' : `Cluster ${c}`);
+            const backgroundColors = uniqueClusters.map(c => 
+                c === -1 ? '#9CA3AF' : getClusterColor(c)
+            );
+            const borderColors = uniqueClusters.map(c => 
+                c === -1 ? '#6B7280' : getClusterColor(c, true)
+            );
+            
+            // Create or update chart
+            if (AppState.chart) {
+                AppState.chart.destroy();
+            }
+            
+            const ctx = DOM.clusterChart.getContext('2d');
+            AppState.chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Point Count',
+                        data: clusterCounts,
+                        backgroundColor: backgroundColors,
+                        borderColor: borderColors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Points',
+                                font: {
+                                    weight: 'bold'
+                                }
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Cluster',
+                                font: {
+                                    weight: 'bold'
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function(context) {
+                                    const index = context.dataIndex;
+                                    const percentage = percentages[index];
+                                    return `Percentage: ${percentage}% of total`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Update description
+            let description = '';
+            
+            if (algorithm === 'kmeans') {
+                description = `
+                    <p class="font-medium">K-Means Cluster Distribution Interpretation:</p>
+                    <p>This histogram shows how many points are assigned to each cluster.</p>
+                    <p>Ideally, clusters should be relatively balanced in size, though the algorithm may find naturally occurring clusters of different sizes.</p>
+                    <p>Very small clusters (less than 5% of points) may indicate outliers or that too many clusters were specified.</p>`;
+            } else if (algorithm === 'dbscan') {
+                description = `
+                    <p class="font-medium">DBSCAN Cluster Distribution Interpretation:</p>
+                    <p>This histogram shows how many points are assigned to each cluster, including noise points.</p>
+                    <p>DBSCAN automatically determines the number of clusters based on data density.</p>
+                    <p>A large number of noise points may indicate the epsilon (ε) is too small or minPts is too large.</p>`;
+            }
+            
+            DOM.chartDescription.innerHTML = description;
+        }
+
+        // Get color for a cluster (with option for border color)
+        function getClusterColor(cluster, border = false) {
+            const colors = [
+                '#3B82F6', // Blue
+                '#EF4444', // Red
+                '#10B981', // Green
+                '#F59E0B', // Yellow
+                '#8B5CF6', // Purple
+                '#EC4899', // Pink
+                '#14B8A6', // Teal
+                '#F97316', // Orange
+                '#6366F1', // Indigo
+                '#84CC16'  // Lime
+            ];
+            
+            const borderColors = [
+                '#1D4ED8', // Dark Blue
+                '#B91C1C', // Dark Red
+                '#047857', // Dark Green
+                '#B45309', // Dark Yellow
+                '#6D28D9', // Dark Purple
+                '#BE185D', // Dark Pink
+                '#0D9488', // Dark Teal
+                '#C2410C', // Dark Orange
+                '#4338CA', // Dark Indigo
+                '#4D7C0F'  // Dark Lime
+            ];
+            
+            // For noise points (cluster = -1), we handle separately
+            if (cluster === -1) {
+                return border ? '#6B7280' : '#9CA3AF';
+            }
+            
+            const index = cluster % colors.length;
+            return border ? borderColors[index] : colors[index];
+        }
+
+        // Show the selected tab
+        function showTab(tabName) {
+            // Hide all content
+            DOM.summaryContent.classList.add('hidden');
+            DOM.clustersContent.classList.add('hidden');
+            DOM.visualizationContent.classList.add('hidden');
+            
+            // Remove active class from all tabs
+            DOM.summaryTab.classList.remove('border-indigo-500', 'text-indigo-600');
+            DOM.summaryTab.classList.add('border-transparent', 'text-gray-500');
+            DOM.clustersTab.classList.remove('border-indigo-500', 'text-indigo-600');
+            DOM.clustersTab.classList.add('border-transparent', 'text-gray-500');
+            DOM.visualizationTab.classList.remove('border-indigo-500', 'text-indigo-600');
+            DOM.visualizationTab.classList.add('border-transparent', 'text-gray-500');
+            
+            // Show selected tab
+            if (tabName === 'summary') {
+                DOM.summaryContent.classList.remove('hidden');
+                DOM.summaryTab.classList.remove('border-transparent', 'text-gray-500');
+                DOM.summaryTab.classList.add('border-indigo-500', 'text-indigo-600');
+            } else if (tabName === 'clusters') {
+                DOM.clustersContent.classList.remove('hidden');
+                DOM.clustersTab.classList.remove('border-transparent', 'text-gray-500');
+                DOM.clustersTab.classList.add('border-indigo-500', 'text-indigo-600');
+            } else if (tabName === 'visualization') {
+                DOM.visualizationContent.classList.remove('hidden');
+                DOM.visualizationTab.classList.remove('border-transparent', 'text-gray-500');
+                DOM.visualizationTab.classList.add('border-indigo-500', 'text-indigo-600');
+            }
+        }
+
+        // Reset the application to initial state
+        function resetApplication() {
+            // Reset file input
+            DOM.fileInput.value = '';
+            DOM.fileName.textContent = '';
+            DOM.fileUpload.classList.remove('active');
+            DOM.fileProgress.classList.add('hidden');
+            DOM.fileProgressFill.style.width = '0%';
+            
+            // Reset dataset and results
+            AppState.dataset = null;
+            AppState.clusteringResults = null;
+            AppState.uploadedFile = null;
+            
+            // Reset buttons
+            DOM.clusterBtn.disabled = true;
+            DOM.visualizeBtn.disabled = true;
+            
+            // Reset summary display
+            DOM.rowCount.textContent = '-';
+            DOM.colCount.textContent = '-';
+            DOM.dataTypeDisplay.textContent = '-';
+            DOM.fileSize.textContent = '-';
+            DOM.numericColumns.textContent = 'No numeric columns detected';
+            DOM.statsTable.innerHTML = '<p class="text-gray-500">No statistics available. Upload a dataset with numeric columns to view statistics.</p>';
+            
+            // Reset cluster display
+            DOM.clusterAssignments.innerHTML = 'No clustering results available. Run clustering first.';
+            DOM.algorithmResults.innerHTML = 'No results available. Run clustering first.';
+            
+            // Reset visualization
+            if (AppState.chart) {
+                AppState.chart.destroy();
+                AppState.chart = null;
+            }
+            
+            DOM.chartDescription.innerHTML = 'Select a visualization type to display the clustering results.';
+            
+            // Show summary tab
+            showTab('summary');
+            
+            // Generate demo data again
+            generateDemoData();
+            showDataSummary();
+        }
+
+        // Initialize the application when the page loads
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
